@@ -26,7 +26,13 @@
 {
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(applicationLaunchedWithUrl:) name:CDVPluginHandleOpenURLNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(applicationPageDidLoad:) name:CDVPageDidLoadNotification object:nil];
+
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(applicationPageWillLoad:) name:@"asd" object:nil];
+    [UIApplication sharedApplication].idleTimerDisabled = YES;
 }
+
+
+
 
 - (void)applicationLaunchedWithUrl:(NSNotification*)notification
 {
@@ -50,6 +56,46 @@
     if (self.url) {
         [self processOpenUrl:self.url pageLoaded:YES];
         self.url = nil;
+    }
+}
+
+- (void)applicationPageWillLoad:(NSNotification*)notification
+{
+    // cold-start handler
+
+    self.pageLoaded = YES;
+
+    [self processWillUrl:notification.object pageLoaded:YES];
+    self.url = nil;
+}
+
+- (void)processWillUrl:(NSURL*)url pageLoaded:(BOOL)pageLoaded
+{
+    __weak __typeof(self) weakSelf = self;
+
+    dispatch_block_t handleOpenUrl = ^(void) {
+        // calls into javascript global function 'handleOpenURL'
+        NSString* jsString = [NSString stringWithFormat:@"document.addEventListener('deviceready',function(){if (typeof WillOpenUrl === 'function') { WillOpenUrl(\"%@\");}});", url.absoluteString];
+
+        [weakSelf.webViewEngine evaluateJavaScript:jsString completionHandler:nil];
+    };
+
+    if (!pageLoaded) {
+        NSString* jsString = @"document.readystate";
+        [self.webViewEngine evaluateJavaScript:jsString
+                             completionHandler:^(id object, NSError* error) {
+                                 if ((error == nil) && [object isKindOfClass:[NSString class]]) {
+                                     NSString* readyState = (NSString*)object;
+                                     BOOL ready = [readyState isEqualToString:@"loaded"] || [readyState isEqualToString:@"complete"];
+                                     if (ready) {
+                                         handleOpenUrl();
+                                     } else {
+                                         self.url = url;
+                                     }
+                                 }
+                             }];
+    } else {
+        handleOpenUrl();
     }
 }
 
